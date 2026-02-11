@@ -4,13 +4,48 @@ import sqlalchemy
 import plotly.express as px
 import json
 
+# 1. Configuración de página (SIEMPRE PRIMERO)
 st.set_page_config(page_title="SEO Dashboard", layout="wide")
 
-# --- CONEXIÓN SEGURA ---
+# ==========================================
+# 🔐 SISTEMA DE LOGIN (CANDADO DE SEGURIDAD)
+# ==========================================
+def check_password():
+    """Retorna True si el usuario ingresó la clave correcta."""
+    if "password_correct" not in st.session_state:
+        st.session_state.password_correct = False
+
+    if st.session_state.password_correct:
+        return True
+
+    st.text_input(
+        "🔐 Ingrese la contraseña de acceso", 
+        type="password", 
+        on_change=password_entered, 
+        key="password_input"
+    )
+    return False
+
+def password_entered():
+    # --- CONTRASEÑA ---
+    if st.session_state["password_input"] == st.secrets["DASHBOARD_PASS"]:
+        st.session_state.password_correct = True
+        del st.session_state["password_input"]  # Borramos la clave de memoria por seguridad
+    else:
+        st.error("😕 Contraseña incorrecta")
+
+if not check_password():
+    st.stop()  # 🛑 AQUÍ SE DETIENE SI NO HAY CLAVE
+
+# ==========================================
+# APLICACIÓN PRINCIPAL (Solo carga si pasó el login)
+# ==========================================
+
+# --- CONEXIÓN A LA BASE DE DATOS ---
 @st.cache_data(ttl=600)
 def load_data():
     try:
-        # Recuperamos credenciales de los Secrets de Streamlit
+        # Recuperamos variables de streamlit
         db_user = st.secrets["DB_USER"]
         db_pass = st.secrets["DB_PASS"]
         db_host = st.secrets["DB_HOST"]
@@ -39,6 +74,7 @@ def load_data():
         st.error(f"Error de conexión: {e}")
         return pd.DataFrame()
 
+# Cargamos datos
 df = load_data()
 
 st.title("🔎 Monitoreo de Posicionamiento Ducasse")
@@ -113,12 +149,10 @@ if not df.empty:
         sel_4 = col4.selectbox("Nivel 4", opts_4, disabled=(len(opts_4)==1))
 
         # --- APLICACIÓN DE FILTROS ---
-        # VALIDACIÓN CRÍTICA DE FECHAS: Solo filtramos si el usuario seleccionó AMBAS fechas
         if len(d_range) == 2:
             start_date, end_date = d_range
             final_mask = (df['fecha'].dt.date >= start_date) & (df['fecha'].dt.date <= end_date)
         else:
-            # Si está seleccionando, usamos todo el rango por defecto para que no falle
             final_mask = pd.Series(True, index=df.index)
 
         # Aplicar cascada
