@@ -6,25 +6,34 @@ import json
 
 st.set_page_config(page_title="SEO Dashboard", layout="wide")
 
+# --- CONEXIÓN SEGURA ---
 @st.cache_data(ttl=600)
 def load_data():
     try:
-        # Construimos la URL usando st.secrets
+        # Recuperamos credenciales de los Secrets de Streamlit
         db_user = st.secrets["DB_USER"]
         db_pass = st.secrets["DB_PASS"]
         db_host = st.secrets["DB_HOST"]
         db_name = st.secrets["DB_NAME"]
 
+        # Conexión
         engine = sqlalchemy.create_engine(f'postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:5432/{db_name}')
 
-        # ... el resto de tu código de la query ...
         query = """
         SELECT fecha, keyword, posicion, categoria_1, categoria_2, categoria_3, categoria_4, 
                url_encontrada, es_canibalizacion, detalle_canibalizacion
         FROM rankings_historico ORDER BY fecha ASC
         """
         df = pd.read_sql(query, engine)
-        # ... resto de tu lógica ...
+        
+        # Convertir fecha a datetime
+        df['fecha'] = pd.to_datetime(df['fecha'])
+        
+        # Limpieza visual de nulos para los filtros
+        cols_cat = ['categoria_1', 'categoria_2', 'categoria_3', 'categoria_4']
+        for col in cols_cat:
+            df[col] = df[col].fillna("")
+            
         return df
     except Exception as e:
         st.error(f"Error de conexión: {e}")
@@ -41,7 +50,6 @@ if not df.empty:
     with tab1:
         st.header("Salud del Proyecto")
         
-        # Última fecha disponible para métricas "de hoy"
         last_date = df['fecha'].max()
         df_last_day = df[df['fecha'] == last_date]
         
@@ -49,11 +57,9 @@ if not df.empty:
         c1.metric("Posición Promedio", f"{df_last_day['posicion'].mean():.1f}")
         c2.metric("Total Keywords", df['keyword'].nunique())
         
-        # Contamos cuántas keywords tienen conflicto HOY (o en la última fecha)
         conflict_count = df_last_day[df_last_day['es_canibalizacion'] == True]['keyword'].nunique()
-        c3.metric("Conflictos Activos- Canibalizaciones hoy", conflict_count, delta_color="inverse")
+        c3.metric("Conflictos Activos Hoy", conflict_count, delta_color="inverse")
         
-        # Gráfico de Tendencia
         daily_avg = df.groupby('fecha')['posicion'].mean().reset_index()
         fig = px.line(daily_avg, x='fecha', y='posicion', markers=True, line_shape='spline', title="Evolución del Ranking Promedio")
         fig.update_yaxes(autorange="reversed")
@@ -61,39 +67,36 @@ if not df.empty:
         st.plotly_chart(fig, use_container_width=True)
 
     # === PESTAÑA 2: ANÁLISIS DETALLADO ===
-    # === PESTAÑA 2: ANÁLISIS DETALLADO ===
     with tab2:
         st.header("Dashboard Jerárquico de Keywords")
         
-        # --- FILTROS DE FECHA Y CANIBALIZACIÓN ---
         with st.container():
             c_date, c_warn = st.columns([2, 1])
             min_d, max_d = df['fecha'].min().date(), df['fecha'].max().date()
+            
+            # Selector de rango de fechas
             d_range = c_date.date_input("Rango de Fechas", [min_d, max_d])
             show_conflict = c_warn.checkbox("Ver solo Canibalizaciones ⚠️")
 
-        st.divider() # Línea separadora visual
+        st.divider()
 
-        # --- FILTROS EN CASCADA (NIVELES 1 -> 4) ---
-        # Usamos 4 columnas para que se vea ordenado
+        # --- FILTROS EN CASCADA ---
         col1, col2, col3, col4 = st.columns(4)
 
-        # 1. NIVEL 1 (Padre)
+        # Nivel 1
         opts_1 = ['Todos'] + sorted(df[df['categoria_1'] != ""]['categoria_1'].unique().tolist()) + ['(Sin Categoría)']
         sel_1 = col1.selectbox("Nivel 1", opts_1)
 
-        # 2. NIVEL 2 (Hijo de 1)
-        # Filtramos los datos disponibles según lo elegido en Nivel 1
+        # Nivel 2
         mask_1 = pd.Series(True, index=df.index)
         if sel_1 == '(Sin Categoría)': mask_1 = df['categoria_1'] == ""
         elif sel_1 != 'Todos': mask_1 = df['categoria_1'] == sel_1
         
         df_l2 = df[mask_1]
         opts_2 = ['Todos'] + sorted(df_l2[df_l2['categoria_2'] != ""]['categoria_2'].unique().tolist())
-        # Si el usuario eligió Nivel 1, habilitamos Nivel 2, si no hay opciones, deshabilitamos
         sel_2 = col2.selectbox("Nivel 2", opts_2, disabled=(len(opts_2)==1))
 
-        # 3. NIVEL 3 (Hijo de 2)
+        # Nivel 3
         mask_2 = pd.Series(True, index=df.index)
         if sel_2 != 'Todos': mask_2 = df['categoria_2'] == sel_2
         
@@ -101,7 +104,7 @@ if not df.empty:
         opts_3 = ['Todos'] + sorted(df_l3[df_l3['categoria_3'] != ""]['categoria_3'].unique().tolist())
         sel_3 = col3.selectbox("Nivel 3", opts_3, disabled=(len(opts_3)==1))
 
-        # 4. NIVEL 4 (Hijo de 3)
+        # Nivel 4
         mask_3 = pd.Series(True, index=df.index)
         if sel_3 != 'Todos': mask_3 = df['categoria_3'] == sel_3
         
@@ -109,12 +112,16 @@ if not df.empty:
         opts_4 = ['Todos'] + sorted(df_l4[df_l4['categoria_4'] != ""]['categoria_4'].unique().tolist())
         sel_4 = col4.selectbox("Nivel 4", opts_4, disabled=(len(opts_4)==1))
 
+        # --- APLICACIÓN DE FILTROS ---
+        # VALIDACIÓN CRÍTICA DE FECHAS: Solo filtramos si el usuario seleccionó AMBAS fechas
+        if len(d_range) == 2:
+            start_date, end_date = d_range
+            final_mask = (df['fecha'].dt.date >= start_date) & (df['fecha'].dt.date <= end_date)
+        else:
+            # Si está seleccionando, usamos todo el rango por defecto para que no falle
+            final_mask = pd.Series(True, index=df.index)
 
-        # --- APLICACIÓN FINAL DE FILTROS ---
-        # Empezamos con el filtro de fecha
-        final_mask = (df['fecha'].dt.date >= d_range[0]) & (df['fecha'].dt.date <= d_range[1])
-        
-        # Aplicamos la cascada de categorías
+        # Aplicar cascada
         if sel_1 == '(Sin Categoría)': final_mask &= (df['categoria_1'] == "")
         elif sel_1 != 'Todos': final_mask &= (df['categoria_1'] == sel_1)
         
@@ -126,11 +133,11 @@ if not df.empty:
             
         filtered_df = df[final_mask].copy()
 
-        # --- MOSTRAR RESULTADOS ---
+        # --- RESULTADOS ---
         if not filtered_df.empty:
             st.info(f"Se encontraron {len(filtered_df)} registros.")
             
-            # 1. GRÁFICO (Siempre visible)
+            # Gráfico
             fig_detail = px.line(
                 filtered_df, x='fecha', y='posicion', color='keyword',
                 line_shape='spline', markers=True, 
@@ -141,54 +148,44 @@ if not df.empty:
             fig_detail.update_yaxes(autorange="reversed", title="Posición (1 es Top)")
             st.plotly_chart(fig_detail, use_container_width=True)
             
-            st.divider() # Separador visual
+            st.divider()
             
-            # 2. TABLA INTELIGENTE
+            # Tabla
             st.subheader("📋 Detalle de Datos")
 
-            # Función para limpiar el JSON de canibalización
             def limpiar_canibalizacion(row):
                 if not row or row == {}: return ""
                 try:
-                    # Si viene como texto, convertir a dict
                     data = row if isinstance(row, dict) else json.loads(row)
                     items = data.get('data', [])
                     if not items: return ""
                     
-                    # Formatear bonito: "Pos 7: url..."
                     conflictos = []
                     for item in items:
-                        url_corta = item['url'].replace('https://', '').replace('http://', '')
-                        conflictos.append(f" Pos {item['pos']}: {url_corta}")
+                        url_corta = item.get('url', '').replace('https://', '').replace('http://', '')
+                        conflictos.append(f"Pos {item.get('pos', '?')}: {url_corta}")
                     return " | ".join(conflictos)
                 except:
                     return "Error formato"
 
-            # Preparamos los datos para la tabla
             tabla_final = filtered_df.copy()
             
-            # Solo si el usuario quiere ver conflictos, procesamos esa columna pesada
             if show_conflict:
                 st.warning("Mostrando detalles de conflictos de canibalización.")
                 tabla_final['Conflicto Detectado'] = tabla_final['detalle_canibalizacion'].apply(limpiar_canibalizacion)
-                
-                # Columnas a mostrar en modo conflicto
                 cols_to_show = ['fecha', 'keyword', 'posicion', 'url_encontrada', 'Conflicto Detectado']
             else:
-                # Columnas a mostrar en modo normal (Limpio)
                 cols_to_show = ['fecha', 'keyword', 'posicion', 'url_encontrada', 'categoria_1', 'categoria_2', 'categoria_3']
 
-            # Formatear la fecha para que no salga la hora (00:00:00)
             tabla_final['fecha'] = tabla_final['fecha'].dt.date
             
-            # Mostrar la tabla final limpia
             st.dataframe(
                 tabla_final[cols_to_show], 
                 use_container_width=True,
-                hide_index=True # Ocultar el índice numérico feo (0, 1, 2...)
+                hide_index=True
             )
                 
         else:
             st.warning("No hay datos para esta combinación de filtros.")
 else:
-    st.warning("No hay datos cargados.")
+    st.warning("No se pudieron cargar datos. Verifica la conexión a la base de datos.")
