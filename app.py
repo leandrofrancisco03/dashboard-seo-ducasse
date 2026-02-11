@@ -32,10 +32,10 @@ def password_entered():
         st.session_state.password_correct = True
         del st.session_state["password_input"]  # Borramos la clave de memoria por seguridad
     else:
-        st.error("😕 Contraseña incorrecta")
+        st.error("Contraseña incorrecta")
 
 if not check_password():
-    st.stop()  # 🛑 AQUÍ SE DETIENE SI NO HAY CLAVE
+    st.stop()  # DETENERSE SI NO HAY CLAVE
 
 # ==========================================
 # APLICACIÓN PRINCIPAL (Solo carga si pasó el login)
