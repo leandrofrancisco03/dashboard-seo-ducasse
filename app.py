@@ -96,7 +96,7 @@ if not df.empty:
         
         # Contamos cuántas keywords tienen conflicto HOY (o en la última fecha)
         conflict_count = df_last_day[df_last_day['es_canibalizacion'] == True]['keyword'].nunique()
-        c3.metric("Conflictos Activos- Canibalizaciones hoy", conflict_count, delta_color="inverse")
+        c3.metric("Conflictos Activos", conflict_count, delta_color="inverse")
         
         # Gráfico de Tendencia
         daily_avg = df.groupby('fecha')['posicion'].mean().reset_index()
@@ -105,7 +105,6 @@ if not df.empty:
         fig.update_traces(line_color='#00CC96', line_width=3)
         st.plotly_chart(fig, use_container_width=True)
 
-    # === PESTAÑA 2: ANÁLISIS DETALLADO ===
     # === PESTAÑA 2: ANÁLISIS DETALLADO ===
     with tab2:
         st.header("Dashboard Jerárquico de Keywords")
@@ -120,145 +119,126 @@ if not df.empty:
         st.divider() # Línea separadora visual
 
         # --- FILTROS EN CASCADA (NIVELES 1 -> 4) ---
-        # Usamos 4 columnas para que se vea ordenado
         col1, col2, col3, col4 = st.columns(4)
 
         def get_mask(df_target, col_name, selection_list):
             """Crea una máscara booleana basada en una selección múltiple, manejando vacíos."""
             if not selection_list:
-                # Si la lista está vacía, seleccionamos TODO
                 return pd.Series(True, index=df_target.index)
             else:
-                # Separamos los valores normales de la etiqueta especial "(Sin Categoría)"
                 query_vals = [x for x in selection_list if x != '(Sin Categoría)']
                 include_blanks = '(Sin Categoría)' in selection_list
-                
-                # Máscara para valores normales
                 mask_vals = df_target[col_name].isin(query_vals)
-                # Máscara para vacíos (si se seleccionó la opción)
                 mask_blanks = (df_target[col_name] == "") if include_blanks else pd.Series(False, index=df_target.index)
-                
-                # Combinamos ambas condiciones con OR (|)
                 return mask_vals | mask_blanks
 
         # --- NIVEL 1 ---
-        # Obtenemos valores únicos reales
         opts_1_raw = sorted(df[df['categoria_1'] != ""]['categoria_1'].unique().tolist())
-        # Si existen vacíos en los datos, agregamos la opción visual
         has_empty_1 = "" in df['categoria_1'].unique()
         opts_1_display = opts_1_raw + (['(Sin Categoría)'] if has_empty_1 else [])
-        
-        # Usamos multiselect
         sel_1 = col1.multiselect("Nivel 1", opts_1_display, placeholder="Elige opciones...")
-        
-        # Calculamos la máscara del Nivel 1
         mask_1 = get_mask(df, 'categoria_1', sel_1)
 
-        # --- NIVEL 2 (Depende de Nivel 1) ---
-        df_l2 = df[mask_1] # Filtramos los datos disponibles
-        
+        # --- NIVEL 2 ---
+        df_l2 = df[mask_1]
         opts_2_raw = sorted(df_l2[df_l2['categoria_2'] != ""]['categoria_2'].unique().tolist())
         has_empty_2 = "" in df_l2['categoria_2'].unique()
         opts_2_display = opts_2_raw + (['(Sin Categoría)'] if has_empty_2 else [])
-        
-        # Deshabilitamos si no hay opciones reales disponibles
         disabled_2 = len(opts_2_display) == 0 or (len(opts_2_display) == 1 and opts_2_display[0] == '(Sin Categoría)' and not has_empty_2)
-        
         sel_2 = col2.multiselect("Nivel 2", opts_2_display, disabled=disabled_2, placeholder="Elige opciones...")
         mask_2 = get_mask(df, 'categoria_2', sel_2)
 
-        # --- NIVEL 3 (Depende de Nivel 1 y 2) ---
+        # --- NIVEL 3 ---
         df_l3 = df[mask_1 & mask_2]
-        
         opts_3_raw = sorted(df_l3[df_l3['categoria_3'] != ""]['categoria_3'].unique().tolist())
         has_empty_3 = "" in df_l3['categoria_3'].unique()
         opts_3_display = opts_3_raw + (['(Sin Categoría)'] if has_empty_3 else [])
-        
         disabled_3 = len(opts_3_display) == 0
         sel_3 = col3.multiselect("Nivel 3", opts_3_display, disabled=disabled_3, placeholder="Elige opciones...")
         mask_3 = get_mask(df, 'categoria_3', sel_3)
 
-        # --- NIVEL 4 (Depende de Nivel 1, 2 y 3) ---
+        # --- NIVEL 4 ---
         df_l4 = df[mask_1 & mask_2 & mask_3]
-        
         opts_4_raw = sorted(df_l4[df_l4['categoria_4'] != ""]['categoria_4'].unique().tolist())
         has_empty_4 = "" in df_l4['categoria_4'].unique()
         opts_4_display = opts_4_raw + (['(Sin Categoría)'] if has_empty_4 else [])
-        
         disabled_4 = len(opts_4_display) == 0
         sel_4 = col4.multiselect("Nivel 4", opts_4_display, disabled=disabled_4, placeholder="Elige opciones...")
         mask_4 = get_mask(df, 'categoria_4', sel_4)
 
 
-        # --- APLICACIÓN FINAL DE TODOS LOS FILTROS ---
-        # 1. Filtro de Fecha
+        # --- APLICACIÓN FINAL DE FILTROS ---
         if len(d_range) == 2:
             start_date, end_date = d_range
             final_mask = (df['fecha'].dt.date >= start_date) & (df['fecha'].dt.date <= end_date)
         else:
             final_mask = pd.Series(True, index=df.index)
 
-        # 2. Combinamos las máscaras de categorías (AND)
         final_mask &= mask_1 & mask_2 & mask_3 & mask_4
         
-        # 3. Filtro de Canibalización
         if show_conflict: final_mask &= (df['es_canibalizacion'] == True)
             
         filtered_df = df[final_mask].copy()
 
-        # --- RESULTADOS (Esto sigue igual que antes, o con el cambio del switch si lo aplicaste) ---
+        # --- RESULTADOS ---
         if not filtered_df.empty:
             st.info(f"Se encontraron {len(filtered_df)} registros.")
             
-            # === NUEVO CONTROL: SWITCH PARA AGRUPAR ===
-            # Creamos columnas para poner el switch a la derecha o izquierda
+            # === CONTROL DE VISTA (SWITCH) ===
             col_graph, col_toggle = st.columns([4, 1])
             
             with col_toggle:
-                st.write("") # Espacio para alinear verticalmente
                 st.write("") 
-                agrupar = st.toggle("📉 Ver Promedio", value=False, help="Fusiona todas las keywords en una sola línea promedio")
+                st.write("") 
+                # AQUÍ ESTÁ EL CAMBIO CLAVE:
+                # Value=False por defecto -> Muestra Promedio
+                # Si activas -> Muestra Detalle
+                ver_detalle = st.toggle("📈 Ver Detalle Keywords", value=False, help="Activa para ver línea por línea")
 
             # === LÓGICA DEL GRÁFICO ===
-            if agrupar:
-                # 1. MODO PROMEDIO: Agrupamos por fecha y calculamos la media de la posición
+            if not ver_detalle:
+                # 1. MODO PROMEDIO (POR DEFECTO)
+                # Agrupamos todo en una sola línea
                 df_chart = filtered_df.groupby('fecha')['posicion'].mean().reset_index()
                 
-                # Le ponemos un nombre genérico para que la leyenda se vea bien
-                # Si hay una categoría seleccionada, usamos ese nombre, si no "Promedio General"
-                nombre_linea = sel_2 if sel_2 != 'Todos' else (sel_1 if sel_1 != 'Todos' else "Promedio Global")
-                df_chart['keyword'] = f"Promedio: {nombre_linea}"
+                # Nombre dinámico para la leyenda
+                if sel_4: nombre = f"Promedio: {', '.join(sel_4)}"
+                elif sel_3: nombre = f"Promedio: {', '.join(sel_3)}"
+                elif sel_2: nombre = f"Promedio: {', '.join(sel_2)}"
+                elif sel_1: nombre = f"Promedio: {', '.join(sel_1)}"
+                else: nombre = "Promedio General"
                 
-                titulo_grafico = "Evolución Promedio (Agrupado)"
-                color_discrete = ['#FF4B4B'] # Color rojo/destacado para el promedio
+                df_chart['keyword'] = nombre
+                
+                titulo_grafico = "Evolución Promedio (Vista Resumida)"
+                color_map = None # Dejar que Plotly asigne un color bonito
             else:
-                # 2. MODO DETALLADO: Usamos los datos tal cual
+                # 2. MODO DETALLADO (SI SE ACTIVA EL SWITCH)
                 df_chart = filtered_df
-                titulo_grafico = "Evolución por Keyword (Detallado)"
-                color_discrete = None # Que Plotly asigne colores automáticos
+                titulo_grafico = "Evolución Detallada por Keyword"
+                color_map = None
 
-            # Crear el gráfico con los datos preparados (df_chart)
+            # Renderizar Gráfico
             fig_detail = px.line(
                 df_chart, 
                 x='fecha', 
                 y='posicion', 
-                color='keyword', # Ahora color depende de si agrupamos o no
+                color='keyword', 
                 line_shape='spline', 
                 markers=True, 
-                color_discrete_sequence=color_discrete,
+                color_discrete_sequence=color_map,
                 height=500,
                 title=titulo_grafico
             )
             
-            # Configuraciones visuales del gráfico
             fig_detail.update_yaxes(autorange="reversed", title="Posición (1 es Top)")
-            fig_detail.update_layout(hovermode="x unified") # Muestra info de todas las líneas al pasar el mouse
+            fig_detail.update_layout(hovermode="x unified")
             
             st.plotly_chart(fig_detail, use_container_width=True)
             
             st.divider()
             
-            # 2. TABLA INTELIGENTE (Esta la dejamos siempre detallada para que puedas auditar)
+            # 2. TABLA DE DATOS (Siempre visible para auditar)
             st.subheader("📋 Detalle de Datos (Raw Data)")
 
             def limpiar_canibalizacion(row):
@@ -276,10 +256,10 @@ if not df.empty:
                 except:
                     return "Error formato"
 
-            tabla_final = filtered_df.copy() # Usamos siempre el DF original para la tabla
+            tabla_final = filtered_df.copy()
             
             if show_conflict:
-                st.warning("Mostrando detalles de conflictos de canibalización.")
+                st.warning("⚠️ Mostrando detalles de conflictos de canibalización.")
                 tabla_final['Conflicto Detectado'] = tabla_final['detalle_canibalizacion'].apply(limpiar_canibalizacion)
                 cols_to_show = ['fecha', 'keyword', 'posicion', 'url_encontrada', 'Conflicto Detectado']
             else:
