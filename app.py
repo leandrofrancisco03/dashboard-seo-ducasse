@@ -88,7 +88,7 @@ if not df.empty:
         
         # Última fecha disponible para métricas "de hoy"
         last_date = df['fecha'].max()
-        df_last_day = df[df['fecha'] == last_date]
+        df_last_day = df[df['fecha'] == last_date].copy()
         
         c1, c2, c3 = st.columns(3)
         c1.metric("Posición Promedio", f"{df_last_day['posicion'].mean():.1f}")
@@ -98,9 +98,119 @@ if not df.empty:
         conflict_count = df_last_day[df_last_day['es_canibalizacion'] == True]['keyword'].nunique()
         c3.metric("Conflictos Activos", conflict_count, delta_color="inverse")
         
-        # Gráfico de Tendencia
+        st.divider()
+
+        # ==========================================
+        # 📊 NUEVO: DISTRIBUCIÓN DE POSICIONES
+        # ==========================================
+        st.subheader("Distribución de posiciones")
+
+        # 1. Función para clasificar las posiciones en rangos
+        def clasificar_rango(pos):
+            if pd.isna(pos): return '> 100'
+            if pos <= 3: return 'TOP 1-3'
+            elif pos <= 10: return 'TOP 4-10'
+            elif pos <= 20: return 'TOP 11-20'
+            elif pos <= 100: return 'TOP 21-100'
+            else: return '> 100'
+
+        df['rango'] = df['posicion'].apply(clasificar_rango)
+        df_last_day['rango'] = df_last_day['posicion'].apply(clasificar_rango)
+
+        # 2. Configurar colores y orden para que coincida con Trueranker
+        orden_rangos = ['TOP 1-3', 'TOP 4-10', 'TOP 11-20', 'TOP 21-100']
+        colores_rangos = {
+            'TOP 1-3': '#F4D03F',   # Amarillo
+            'TOP 4-10': '#AED6F1',  # Celeste claro
+            'TOP 11-20': '#85C1E9', # Azul intermedio
+            'TOP 21-100': '#5DADE2' # Azul más oscuro
+        }
+
+        # 3. Preparar gráfico de Donut (Plotly)
+        distribucion_hoy = df_last_day['rango'].value_counts().reindex(orden_rangos).reset_index()
+        distribucion_hoy.columns = ['Rango', 'Total']
+        distribucion_hoy = distribucion_hoy.fillna(0) # Por si algún rango está vacío
+
+        fig_donut = px.pie(
+            distribucion_hoy, 
+            values='Total', 
+            names='Rango', 
+            hole=0.55,
+            color='Rango',
+            color_discrete_map=colores_rangos
+        )
+        fig_donut.update_traces(
+            textinfo='none', 
+            hovertemplate='<b>%{label}</b><br>Distribución de palabras clave: %{percent}'
+        )
+        fig_donut.update_layout(
+            showlegend=False, 
+            margin=dict(t=10, b=10, l=10, r=10),
+            height=250 # Ajustamos altura para que encaje bien junto a la tabla
+        )
+
+        # 4. Preparar datos para la tabla y las "Nuevas / Perdidas"
+        fechas_ordenadas = sorted(df['fecha'].unique())
+        fecha_anterior = fechas_ordenadas[-2] if len(fechas_ordenadas) > 1 else last_date
+        df_prev_day = df[df['fecha'] == fecha_anterior]
+
+        # Calculamos la tendencia histórica por rango (para el mini-gráfico)
+        tendencias = df.groupby(['rango', 'fecha']).size().unstack(fill_value=0)
+
+        datos_tabla = []
+        for rango in orden_rangos:
+            # Histórico para el mini gráfico
+            tendencia_historica = tendencias.loc[rango].tolist() if rango in tendencias.index else [0]
+            
+            # Cálculo básico de Nuevas y Perdidas (Comparando HOY vs AYER)
+            kw_hoy = set(df_last_day[df_last_day['rango'] == rango]['keyword'])
+            kw_ayer = set(df_prev_day[df_prev_day['rango'] == rango]['keyword'])
+            
+            nuevas = len(kw_hoy - kw_ayer)
+            perdidas = len(kw_ayer - kw_hoy)
+
+            datos_tabla.append({
+                "Rango": f"🟢 {rango}" if rango == 'TOP 1-3' else f"🔵 {rango}",
+                "Total": len(kw_hoy),
+                "Nuevas": f"+{nuevas}" if nuevas > 0 else "0",
+                "Perdidas": f"-{perdidas}" if perdidas > 0 else "0",
+                "Tendencia": tendencia_historica
+            })
+
+        df_tabla_final = pd.DataFrame(datos_tabla)
+
+        # 5. Renderizar el Layout (Gráfico a la izq, Tabla a la der)
+        col_donut, col_tabla = st.columns([1, 2.5], gap="medium")
+
+        with col_donut:
+            st.plotly_chart(fig_donut, use_container_width=True)
+
+        with col_tabla:
+            st.write("") # Pequeño espaciado para alinear verticalmente
+            st.dataframe(
+                df_tabla_final,
+                column_config={
+                    "Rango": st.column_config.TextColumn("Distribución de posiciones"),
+                    "Total": st.column_config.NumberColumn("Total"),
+                    "Nuevas": st.column_config.TextColumn("Nuevas"),
+                    "Perdidas": st.column_config.TextColumn("Perdidas"),
+                    "Tendencia": st.column_config.AreaChartColumn(
+                        "Tendencia", 
+                        y_min=0,
+                    )
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+
+        st.divider()
+        
+        # ==========================================
+        # RESTO DE TU PESTAÑA 1 (Gráfico de línea de tendencia que ya tenías)
+        # ==========================================
+        st.subheader("Evolución del Ranking Promedio")
         daily_avg = df.groupby('fecha')['posicion'].mean().reset_index()
-        fig = px.line(daily_avg, x='fecha', y='posicion', markers=True, line_shape='spline', title="Evolución del Ranking Promedio")
+        fig = px.line(daily_avg, x='fecha', y='posicion', markers=True, line_shape='spline')
         fig.update_yaxes(autorange="reversed")
         fig.update_traces(line_color='#00CC96', line_width=3)
         st.plotly_chart(fig, use_container_width=True)
