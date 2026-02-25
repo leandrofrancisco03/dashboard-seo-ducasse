@@ -77,6 +77,15 @@ def load_data():
 # Cargamos datos
 df = load_data()
 
+# Función global para rangos de posiciones
+def clasificar_rango(pos):
+    if pd.isna(pos): return '> 100'
+    if pos <= 3: return 'TOP 1-3'
+    elif pos <= 10: return 'TOP 4-10'
+    elif pos <= 20: return 'TOP 11-20'
+    elif pos <= 100: return 'TOP 21-100'
+    else: return '> 100'
+
 st.title("🔎 Monitoreo de Posicionamiento Ducasse")
 
 if not df.empty:
@@ -96,124 +105,18 @@ if not df.empty:
         
         # Contamos cuántas keywords tienen conflicto HOY (o en la última fecha)
         conflict_count = df_last_day[df_last_day['es_canibalizacion'] == True]['keyword'].nunique()
-        c3.metric("Conflictos Activos", conflict_count, delta_color="inverse")
+        c3.metric("Conflictos Activos- Canibalizaciones hoy", conflict_count, delta_color="inverse")
         
         st.divider()
-
-        # ==========================================
-        # 📊 NUEVO: DISTRIBUCIÓN DE POSICIONES
-        # ==========================================
-        st.subheader("Distribución de posiciones")
-
-        # 1. Función para clasificar las posiciones en rangos
-        def clasificar_rango(pos):
-            if pd.isna(pos): return '> 100'
-            if pos <= 3: return 'TOP 1-3'
-            elif pos <= 10: return 'TOP 4-10'
-            elif pos <= 20: return 'TOP 11-20'
-            elif pos <= 100: return 'TOP 21-100'
-            else: return '> 100'
-
-        df['rango'] = df['posicion'].apply(clasificar_rango)
-        df_last_day['rango'] = df_last_day['posicion'].apply(clasificar_rango)
-
-        # 2. Configurar colores y orden para que coincida con Trueranker
-        orden_rangos = ['TOP 1-3', 'TOP 4-10', 'TOP 11-20', 'TOP 21-100']
-        colores_rangos = {
-            'TOP 1-3': '#F4D03F',   # Amarillo
-            'TOP 4-10': '#AED6F1',  # Celeste claro
-            'TOP 11-20': '#85C1E9', # Azul intermedio
-            'TOP 21-100': '#5DADE2' # Azul más oscuro
-        }
-
-        # 3. Preparar gráfico de Donut (Plotly)
-        distribucion_hoy = df_last_day['rango'].value_counts().reindex(orden_rangos).reset_index()
-        distribucion_hoy.columns = ['Rango', 'Total']
-        distribucion_hoy = distribucion_hoy.fillna(0) # Por si algún rango está vacío
-
-        fig_donut = px.pie(
-            distribucion_hoy, 
-            values='Total', 
-            names='Rango', 
-            hole=0.55,
-            color='Rango',
-            color_discrete_map=colores_rangos
-        )
-        fig_donut.update_traces(
-            textinfo='none', 
-            hovertemplate='<b>%{label}</b><br>Distribución de palabras clave: %{percent}'
-        )
-        fig_donut.update_layout(
-            showlegend=False, 
-            margin=dict(t=10, b=10, l=10, r=10),
-            height=250 # Ajustamos altura para que encaje bien junto a la tabla
-        )
-
-        # 4. Preparar datos para la tabla y las "Nuevas / Perdidas"
-        fechas_ordenadas = sorted(df['fecha'].unique())
-        fecha_anterior = fechas_ordenadas[-2] if len(fechas_ordenadas) > 1 else last_date
-        df_prev_day = df[df['fecha'] == fecha_anterior]
-
-        # Calculamos la tendencia histórica por rango (para el mini-gráfico)
-        tendencias = df.groupby(['rango', 'fecha']).size().unstack(fill_value=0)
-
-        datos_tabla = []
-        for rango in orden_rangos:
-            # Histórico para el mini gráfico
-            tendencia_historica = tendencias.loc[rango].tolist() if rango in tendencias.index else [0]
-            
-            # Cálculo básico de Nuevas y Perdidas (Comparando HOY vs AYER)
-            kw_hoy = set(df_last_day[df_last_day['rango'] == rango]['keyword'])
-            kw_ayer = set(df_prev_day[df_prev_day['rango'] == rango]['keyword'])
-            
-            nuevas = len(kw_hoy - kw_ayer)
-            perdidas = len(kw_ayer - kw_hoy)
-
-            datos_tabla.append({
-                "Rango": f"🟢 {rango}" if rango == 'TOP 1-3' else f"🔵 {rango}",
-                "Total": len(kw_hoy),
-                "Nuevas": f"+{nuevas}" if nuevas > 0 else "0",
-                "Perdidas": f"-{perdidas}" if perdidas > 0 else "0",
-                "Tendencia": tendencia_historica
-            })
-
-        df_tabla_final = pd.DataFrame(datos_tabla)
-
-        # 5. Renderizar el Layout (Gráfico a la izq, Tabla a la der)
-        col_donut, col_tabla = st.columns([1, 2.5], gap="medium")
-
-        with col_donut:
-            st.plotly_chart(fig_donut, use_container_width=True)
-
-        with col_tabla:
-            st.write("") # Pequeño espaciado para alinear verticalmente
-            st.dataframe(
-                df_tabla_final,
-                column_config={
-                    "Rango": st.column_config.TextColumn("Distribución de posiciones"),
-                    "Total": st.column_config.NumberColumn("Total"),
-                    "Nuevas": st.column_config.TextColumn("Nuevas"),
-                    "Perdidas": st.column_config.TextColumn("Perdidas"),
-                    "Tendencia": st.column_config.AreaChartColumn(
-                        "Tendencia", 
-                        y_min=0,
-                    )
-                },
-                hide_index=True,
-                use_container_width=True
-            )
-
-        st.divider()
         
-        # ==========================================
-        # RESTO DE TU PESTAÑA 1 (Gráfico de línea de tendencia que ya tenías)
-        # ==========================================
-        st.subheader("Evolución del Ranking Promedio")
+        # Gráfico de Tendencia General
+        st.subheader("Evolución del Ranking Promedio Global")
         daily_avg = df.groupby('fecha')['posicion'].mean().reset_index()
         fig = px.line(daily_avg, x='fecha', y='posicion', markers=True, line_shape='spline')
-        fig.update_yaxes(autorange="reversed")
+        fig.update_yaxes(autorange="reversed", title="Posición Promedio (1 es mejor)")
         fig.update_traces(line_color='#00CC96', line_width=3)
         st.plotly_chart(fig, use_container_width=True)
+
 
     # === PESTAÑA 2: ANÁLISIS DETALLADO ===
     with tab2:
@@ -232,7 +135,6 @@ if not df.empty:
         col1, col2, col3, col4 = st.columns(4)
 
         def get_mask(df_target, col_name, selection_list):
-            """Crea una máscara booleana basada en una selección múltiple, manejando vacíos."""
             if not selection_list:
                 return pd.Series(True, index=df_target.index)
             else:
@@ -285,50 +187,119 @@ if not df.empty:
             final_mask = pd.Series(True, index=df.index)
 
         final_mask &= mask_1 & mask_2 & mask_3 & mask_4
-        
         if show_conflict: final_mask &= (df['es_canibalizacion'] == True)
             
         filtered_df = df[final_mask].copy()
 
         # --- RESULTADOS ---
         if not filtered_df.empty:
-            st.info(f"Se encontraron {len(filtered_df)} registros.")
+            st.info(f"Se encontraron {len(filtered_df)} registros para esta selección.")
+
+            # ==========================================
+            # 📊 MOVIDO AQUÍ: DISTRIBUCIÓN DE POSICIONES INTERACTIVA
+            # ==========================================
+            st.subheader("Distribución de Posiciones (Segmentado)")
+
+            filtered_df['rango'] = filtered_df['posicion'].apply(clasificar_rango)
             
-            # === CONTROL DE VISTA (SWITCH) ===
+            fechas_ordenadas = sorted(filtered_df['fecha'].unique())
+            last_date_filt = fechas_ordenadas[-1]
+            fecha_anterior_filt = fechas_ordenadas[-2] if len(fechas_ordenadas) > 1 else last_date_filt
+            
+            df_last_day_filt = filtered_df[filtered_df['fecha'] == last_date_filt]
+            df_prev_day_filt = filtered_df[filtered_df['fecha'] == fecha_anterior_filt]
+
+            orden_rangos = ['TOP 1-3', 'TOP 4-10', 'TOP 11-20', 'TOP 21-100']
+            colores_rangos = {
+                'TOP 1-3': '#F4D03F',   # Amarillo
+                'TOP 4-10': '#AED6F1',  # Celeste claro
+                'TOP 11-20': '#85C1E9', # Azul intermedio
+                'TOP 21-100': '#5DADE2' # Azul más oscuro
+            }
+
+            distribucion_hoy = df_last_day_filt['rango'].value_counts().reindex(orden_rangos).reset_index()
+            distribucion_hoy.columns = ['Rango', 'Total']
+            distribucion_hoy = distribucion_hoy.fillna(0)
+
+            fig_donut = px.pie(
+                distribucion_hoy, 
+                values='Total', 
+                names='Rango', 
+                hole=0.55,
+                color='Rango',
+                color_discrete_map=colores_rangos
+            )
+            fig_donut.update_traces(textinfo='none', hovertemplate='<b>%{label}</b><br>Distribución de palabras clave: %{percent}')
+            fig_donut.update_layout(showlegend=False, margin=dict(t=10, b=10, l=10, r=10), height=250)
+
+            tendencias = filtered_df.groupby(['rango', 'fecha']).size().unstack(fill_value=0)
+
+            datos_tabla = []
+            for rango in orden_rangos:
+                tendencia_historica = tendencias.loc[rango].tolist() if rango in tendencias.index else [0]
+                kw_hoy = set(df_last_day_filt[df_last_day_filt['rango'] == rango]['keyword'])
+                kw_ayer = set(df_prev_day_filt[df_prev_day_filt['rango'] == rango]['keyword'])
+                
+                nuevas = len(kw_hoy - kw_ayer)
+                perdidas = len(kw_ayer - kw_hoy)
+
+                datos_tabla.append({
+                    "Rango": f"🟢 {rango}" if rango == 'TOP 1-3' else f"🔵 {rango}",
+                    "Total": len(kw_hoy),
+                    "Nuevas": f"+{nuevas}" if nuevas > 0 else "0",
+                    "Perdidas": f"-{perdidas}" if perdidas > 0 else "0",
+                    "Tendencia": tendencia_historica
+                })
+
+            df_tabla_final = pd.DataFrame(datos_tabla)
+
+            col_donut, col_tabla = st.columns([1, 2.5], gap="medium")
+
+            with col_donut:
+                st.plotly_chart(fig_donut, use_container_width=True)
+
+            with col_tabla:
+                st.write("") 
+                st.dataframe(
+                    df_tabla_final,
+                    column_config={
+                        "Rango": st.column_config.TextColumn("Distribución de posiciones"),
+                        "Total": st.column_config.NumberColumn("Total"),
+                        "Nuevas": st.column_config.TextColumn("Nuevas"),
+                        "Perdidas": st.column_config.TextColumn("Perdidas"),
+                        "Tendencia": st.column_config.AreaChartColumn("Tendencia", y_min=0)
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+
+            st.divider()
+            
+            # === CONTROL DE VISTA (SWITCH PARA LINE CHART) ===
             col_graph, col_toggle = st.columns([4, 1])
-            
             with col_toggle:
                 st.write("") 
                 st.write("") 
-                # AQUÍ ESTÁ EL CAMBIO CLAVE:
-                # Value=False por defecto -> Muestra Promedio
-                # Si activas -> Muestra Detalle
                 ver_detalle = st.toggle("📈 Ver Detalle Keywords", value=False, help="Activa para ver línea por línea")
 
-            # === LÓGICA DEL GRÁFICO ===
+            # === LÓGICA DEL GRÁFICO (Líneas) ===
             if not ver_detalle:
-                # 1. MODO PROMEDIO (POR DEFECTO)
-                # Agrupamos todo en una sola línea
                 df_chart = filtered_df.groupby('fecha')['posicion'].mean().reset_index()
                 
-                # Nombre dinámico para la leyenda
                 if sel_4: nombre = f"Promedio: {', '.join(sel_4)}"
                 elif sel_3: nombre = f"Promedio: {', '.join(sel_3)}"
                 elif sel_2: nombre = f"Promedio: {', '.join(sel_2)}"
                 elif sel_1: nombre = f"Promedio: {', '.join(sel_1)}"
-                else: nombre = "Promedio General"
+                else: nombre = "Promedio General Segmentado"
                 
                 df_chart['keyword'] = nombre
-                
                 titulo_grafico = "Evolución Promedio (Vista Resumida)"
-                color_map = None # Dejar que Plotly asigne un color bonito
+                color_map = None 
             else:
-                # 2. MODO DETALLADO (SI SE ACTIVA EL SWITCH)
                 df_chart = filtered_df
                 titulo_grafico = "Evolución Detallada por Keyword"
                 color_map = None
 
-            # Renderizar Gráfico
             fig_detail = px.line(
                 df_chart, 
                 x='fecha', 
@@ -348,8 +319,8 @@ if not df.empty:
             
             st.divider()
             
-            # 2. TABLA DE DATOS (Siempre visible para auditar)
-            st.subheader("📋 Detalle de Datos (Raw Data)")
+            # 2. TABLA DE DATOS (Raw Data)
+            st.subheader("📋 Detalle de Datos Raw")
 
             def limpiar_canibalizacion(row):
                 if not row or row == {}: return ""
